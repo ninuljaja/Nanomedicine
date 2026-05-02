@@ -124,7 +124,7 @@ class NanoparticleInverseModel:
         class DynamicInverseProblem(ElementwiseProblem):
             def __init__(self, outer, xl_val, xu_val):
                 n_variables = len(xl_val)
-                super().__init__(n_var=n_variables, n_obj=len(outer.target_names), n_constr=0, xl=xl_val, xu=xu_val)
+                super().__init__(n_var=n_variables, n_obj=len(outer.target_names), n_constr=7, xl=xl_val, xu=xu_val)
                 self.outer = outer
 
             def _evaluate(self, x, out, *args, **kwargs):
@@ -181,6 +181,51 @@ class NanoparticleInverseModel:
                 # negate index 0 (Tumor) because NSGA3 minimizes by default
                 objectives = [preds[i] if i != tumor_idx else -preds[i] for i in range(len(preds))]
                 out["F"] = np.array(objectives)
+
+                # Capture variables
+                size_tem = x[0]
+                size_hd = x[1]
+                zeta = x[2]
+                pdi = x[3]
+                # strategy: 0 = active, 1 = passive
+                strategy = int(np.round(x[7]))
+                strategy = np.clip(strategy, 0, 1)
+
+                # Identify the tumor prediction
+                tumor_idx = outer_target_names.index(outer_tumor_target_name)
+                predicted_tumor_conc = preds[tumor_idx]
+
+                constraints = []
+
+                # Physical Consistency (2 constraints)
+                # HD must be >= TEM
+                constraints.append(size_tem - size_hd)  # <= 0
+                # Enforce PDI <= 0.2
+                constraints.append(pdi - 0.2)
+
+                # Biological Efficacy (1 constraint)
+                # Reject if tumor concentration is less than 10%
+                # If tumor is 5%, 10 - 5 = 5 (Positive = Violation)
+                # If tumor is 15%, 10 - 15 = -5 (Negative = Success)
+                constraints.append(10 - predicted_tumor_conc)
+
+                # Strategy Dependent (4 constraints)
+                if strategy == 1:  # passive
+                    # Size constraints
+                    constraints.append(20 - size_hd)  # size >= 20
+                    constraints.append(size_hd - 150)  # size <= 150
+                    # Zeta constraints
+                    constraints.append(-10 - zeta)  # zeta >= -10
+                    constraints.append(zeta - 10)  # zeta <= 10
+                else:  # active
+                    # Size constraints
+                    constraints.append(20 - size_hd)
+                    constraints.append(size_hd - 100)
+                    # Zeta constraints
+                    constraints.append(-20 - zeta)
+                    constraints.append(zeta - 10)
+
+                out["G"] = np.array(constraints)
 
         problem = DynamicInverseProblem(self, xl, xu)
 
