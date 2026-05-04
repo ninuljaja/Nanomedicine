@@ -73,14 +73,13 @@
 			
 			.video-container {
 				position: relative;
-				width: 250px; 
 				max-width: 100%;
 				margin: 0 auto;
 				cursor: pointer;
 			}
 
 			.video-container img {
-				width: 100%;
+				width: 250px;
 				border-radius: 6px;
 			}
 
@@ -113,12 +112,12 @@
 			<!-- TEAM -->
 			<div class="card bios">
 				<div class="bio">
-					<img src="files/image1.jpg">
-					<div>Rakshak Gurung</div>
+					<img src="files/image1.jpg" alt="photo">
+					<div>Rakshak Nath Gurung</div>
 				</div>
 
 				<div class="bio">
-					<img src="files/image2.jpg">
+					<img src="files/image2.jpg" alt="photo">
 					<div>Nino Tkabladze</div>
 				</div>
 			</div>
@@ -141,7 +140,7 @@
 			
 			<div class="card">
 				<div class="video-container">
-					<img src="https://img.youtube.com/vi/tgbNymZ7vqY/0.jpg" alt="Video thumbnail">
+					<img src="https://img.youtube.com/vi/TRSwwINOiH0/0.jpg" alt="Video thumbnail">
 					<div class="play-button">▶</div>
 				</div>
 			</div>
@@ -153,8 +152,9 @@
 			document.querySelector('.video-container').addEventListener('click', function() {
 				this.innerHTML = `
 					<iframe
-					src="https://www.youtube.com/embed/tgbNymZ7vqY"
-					frameborder="0" allowfullscreen></iframe>
+					src="https://www.youtube.com/embed/TRSwwINOiH0"
+					frameborder="0" allow="fullscreen"></iframe>
+
 				`;
 			});
 		</script>
