@@ -15,7 +15,7 @@
 			.container {
 				min-height: 100vh;
 				display: grid;
-				grid-template-rows: auto auto auto 1fr;
+				grid-template-rows: auto auto auto auto 1fr;
 				gap: 8px;
 				padding: 8px;
 				box-sizing: border-box;
@@ -53,6 +53,7 @@
 				justify-content: center;
 				gap: 12px;
 				flex-wrap: wrap;
+				align-items: flex-start;
 			}
 
 			a.button {
@@ -73,13 +74,22 @@
 			
 			.video-container {
 				position: relative;
-				max-width: 100%;
+				width: 100%;
+				max-width: 350px;
+				aspect-ratio: 16 / 9;
 				margin: 0 auto;
 				cursor: pointer;
+				transition: max-width 0.3s ease;
+			}
+
+			.video-container.expanded-video {
+			    max-width: 560px; /* Expands when playing */
 			}
 
 			.video-container img {
-				width: 250px;
+				width: 100%;
+			    height: 100%;
+			    object-fit: cover;
 				border-radius: 6px;
 			}
 
@@ -143,7 +153,7 @@
 			
 			<div class="card">
 				<div class="video-container">
-					<img src="https://img.youtube.com/vi/TRSwwINOiH0/0.jpg" alt="Video thumbnail">
+					<img src="https://img.youtube.com/vi/TRSwwINOiH0/hq1.jpg" alt="Video thumbnail">
 					<div class="play-button">▶</div>
 				</div>
 			</div>
@@ -152,17 +162,35 @@
 
 		</div>	
 		<script>
-			document.querySelector('.video-container').addEventListener('click', function() {
-				this.innerHTML = `
-					<iframe
-					src="https://www.youtube.com/embed/TRSwwINOiH0?autoplay=1"
-					allow="fullscreen"></iframe>
+		   const videoContainerElement = document.querySelector('.video-container');
 
-				`;
-			});
+		   window.addEventListener('load', function scrollToVideoOnLoad() {
+			  setTimeout(function executeInitialScroll() {
+				 videoContainerElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			  }, 100);
+		   });
+
+		   function expandAndPlayVideo() {
+			  videoContainerElement.classList.add('expanded-video');
+
+			  videoContainerElement.innerHTML = `
+				 <iframe
+				 src="https://www.youtube.com/embed/TRSwwINOiH0?autoplay=1"
+				 allow="autoplay; fullscreen"
+				 style="border: none;"></iframe>
+			  `;
+
+			  // Wait 300ms for the CSS expansion transition to finish, then scroll to the absolute bottom of the page
+			  setTimeout(function executeScrollToBottom() {
+				 window.scrollTo({
+					top: document.body.scrollHeight,
+					behavior: 'smooth'
+				 });
+			  }, 300);
+		   }
+
+		   videoContainerElement.addEventListener('click', expandAndPlayVideo);
 		</script>
-
-			
 
 	</body>
 </html>
