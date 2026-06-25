@@ -15,16 +15,31 @@ from pymoo.core.callback import Callback
 
 
 # Progress Bar Callback
+# Progress Bar Callback
 class GenerationProgressBar(Callback):
-    def __init__(self, n_gen):
+    def __init__(self, n_gen, ui_bar=None):
         super().__init__()
-        self.pbar = tqdm(total=n_gen, desc="Optimizing Design", leave=False)
+        self.n_gen = n_gen
+        self.ui_bar = ui_bar
+        self.current = 0
+
+        # only initialize tqdm if we are not using the Streamlit UI
+        if not self.ui_bar:
+            self.pbar = tqdm(total=n_gen, desc="Optimizing Design", leave=False)
 
     def notify(self, algorithm):
-        self.pbar.update(1)
+        self.current += 1
+        if self.ui_bar:
+            # update the Streamlit UI
+            percent = min(int((self.current / self.n_gen) * 100), 100)
+            self.ui_bar.progress(percent,
+                                 text=f"Running NSGA-III Optimization (Generation {self.current}/{self.n_gen})...")
+        else:
+            self.pbar.update(1)
 
     def close(self):
-        self.pbar.close()
+        if not self.ui_bar:
+            self.pbar.close()
 
 
 # Main Inverse Model Class
@@ -51,18 +66,43 @@ class NanoparticleInverseModel:
 
         # categorical options for optimization mapping
         self.core_options = [
-            "polymeric", "gold", "liposome", "silica", "hydrogel",
-            "dendrimer", "graphene", "iron oxide", "drug_based",
-            "albumin", "carbon_nanotube", "magnetic",
-            "protein_based", "polymeric_composite", "manganese",
-            "copper", "anticancer drug", "platinum",
-            "lipid_based", "silica_based", "2d_material"
+            "2d_material", "albumin", "carbon_nanotube", "copper", "dendrimer",
+            "drug_based", "gold", "graphene", "hydrogel", "iron oxide",
+            "lipid_based", "liposome", "magnetic", "manganese", "metallic",
+            "platinum", "polymeric", "polymeric_composite",
+            "protein_based", "silica", "silica_based"
         ]
+
+        # dependency mapping: Core Material -> Particle Type
+        self.core_to_type = {
+            "2d_material": ['inm'],
+            "albumin": ['onm'],
+            "carbon_nanotube": ['onm'],
+            "copper": ['inm'],
+            "dendrimer": ['onm'],
+            "drug_based": ['hybrid', 'inm', 'onm'],
+            "gold": ['inm'],
+            "graphene": ['onm'],
+            "hydrogel": ['onm'],
+            "iron oxide": ['inm'],
+            "lipid_based": ['hybrid', 'onm'],
+            "liposome": ['onm'],
+            "magnetic": ['hybrid', 'inm'],
+            "manganese": ['inm'],
+            "metallic": ['hybrid', 'inm'],
+            "platinum": ['inm'],
+            "polymeric": ['onm'],
+            "polymeric_composite": ['hybrid', 'onm'],
+            "protein_based": ['onm'],
+            "silica": ['inm'],
+            "silica_based": ['hybrid', 'inm']
+        }
+
         self.strategy_options = ["active", "passive"]
         self.shape_options = ["spherical", "rod", "plate"]
         self.particle_type_options = ["inm", "hybrid", "onm"]
 
-        # ordered list matching the categorical section of var_order (indices 6-9)
+        # ordered list matching the categorical section of var_order
         self.categorical_options_ordered = [
             self.core_options,
             self.strategy_options,
@@ -70,17 +110,30 @@ class NanoparticleInverseModel:
             self.particle_type_options
         ]
 
+
         print(f"Targets: {self.target_names}")
 
     def predict_optimal_design(self, tumor_cell, tumor_size, body_weight,
                                sensitive_organ_weights=None,
-                               custom_constraints=None,
-                               generations=60):
+                               allowed_cores=None,
+                               generations=60,
+                               max_pdi=0.3,
+                               min_tumor_conc=10.0,
+                               min_hd_size=6.0,
+                               max_hd_size=310.0,
+                               min_zeta=-45.0,
+                               max_zeta=30.0,
+                               ui_progress_bar=None):
         # default weight of 1.0
         full_weights = {organ: 1.0 for organ in self.target_names}
         if sensitive_organ_weights:
             # merge provided weights with defaults
             full_weights.update(sensitive_organ_weights)
+
+        # fallback to all cores if user clears the multi-select
+        if not allowed_cores:
+            allowed_cores = self.core_options
+
 
         # handle constraints
         # Variables:
@@ -89,18 +142,12 @@ class NanoparticleInverseModel:
 
         xl = np.array([2.0, 3.0, -60.0, 0.01, 0.01, 0.5, 0, 0, 0, 0])
         xu = np.array([320.0, 400.0, 40, 0.95, 740.0, 96.0,
-                       len(self.core_options) - 0.1,
+                       len(allowed_cores) - 0.1,
                        len(self.strategy_options) - 0.1,
                        len(self.shape_options) - 0.1,
                        len(self.particle_type_options) - 0.1])
 
-        # apply custom numeric constraints
-        if custom_constraints:
-            for feature, bounds in custom_constraints.items():
-                if feature in self.var_order:
-                    i = self.var_order.index(feature)
-                    xl[i] = bounds[0]
-                    xu[i] = bounds[1]
+
 
         # setup NSGA-3 based on the actual number of objectives found
         n_obj = len(self.target_names)
@@ -115,10 +162,13 @@ class NanoparticleInverseModel:
         }
 
         # capture references needed inside the nested class
-        outer_categorical_options = self.categorical_options_ordered
+
         outer_specific_features = self.specific_features
         outer_target_names = self.target_names
         outer_tumor_target_name = self.tumor_target_name
+        outer_strategy_options = self.strategy_options
+        outer_shape_options = self.shape_options
+        outer_core_to_type = self.core_to_type
 
         class DynamicInverseProblem(ElementwiseProblem):
             def __init__(self, outer, xl_val, xu_val):
@@ -128,12 +178,19 @@ class NanoparticleInverseModel:
 
             def _evaluate(self, x, out, *args, **kwargs):
 
-                # map categorical indices back to strings using the ordered options list
-                categorical_start_index = 6
-                resolved_categorical_values = [
-                    outer_categorical_options[offset][int(x[categorical_start_index + offset])]
-                    for offset in range(len(outer_categorical_options))
-                ]
+                # Map categorical indices
+                selected_core = allowed_cores[int(x[6])]
+                selected_strategy = outer_strategy_options[int(x[7])]
+                selected_shape = outer_shape_options[int(x[8])]
+
+                # dynamic selection for Particle Type
+                # Fetch the valid sub-list of types for this specific core
+                valid_types_for_core = outer_core_to_type[selected_core]
+
+                # Use modulo to wrap the optimizer's guess (0, 1, or 2) into the valid sub-list
+                # If valid_types length is 1, it always resolves to index 0
+                type_index = int(x[9]) % len(valid_types_for_core)
+                derived_particle_type = valid_types_for_core[type_index]
 
                 # design parameters from optimizer
                 design_params = {
@@ -143,10 +200,10 @@ class NanoparticleInverseModel:
                     "PDI": x[3],
                     "Administration Dose (mg/kg)": np.log1p(x[4]),
                     "Time Point (h)": np.log1p(x[5]),
-                    "Core Material": resolved_categorical_values[0],
-                    "Targeting Strategy": resolved_categorical_values[1],
-                    "Shape": resolved_categorical_values[2],
-                    "Particle Type": resolved_categorical_values[3]
+                    "Core Material": selected_core,
+                    "Targeting Strategy": selected_strategy,
+                    "Shape": selected_shape,
+                    "Particle Type": derived_particle_type
                 }
 
                 # merge design parameters with the fixed scenario inputs
@@ -193,7 +250,7 @@ class NanoparticleInverseModel:
                 pdi = x[3]
 
                 # Identify the tumor prediction
-                tumor_idx = outer_target_names.index(outer_tumor_target_name)
+
                 predicted_tumor_conc = preds[tumor_idx]
 
                 constraints = []
@@ -202,26 +259,26 @@ class NanoparticleInverseModel:
                 # HD must be >= TEM
                 constraints.append(size_tem - size_hd)  # <= 0
                 # Enforce PDI <= 0.3
-                constraints.append(pdi - 0.3)
+                constraints.append(pdi - max_pdi)
 
                 # Biological Efficacy (1 constraint)
                 # Reject if tumor concentration is less than 10%
                 # If tumor is 5%, 10 - 5 = 5 (Positive = Violation)
                 # If tumor is 15%, 10 - 15 = -5 (Negative = Success)
-                constraints.append(10 - predicted_tumor_conc)
+                constraints.append(min_tumor_conc - predicted_tumor_conc)
 
                 # Unified Biological Feasibility (4 constraints)
                 # Penalize designs that stray outside the 2.5% - 97.5% dense data regions
-                constraints.append(6 - size_hd)  # HD Size >= 6nm
-                constraints.append(size_hd - 310)  # HD Size <= 310nm
-                constraints.append(-45 - zeta)  # Zeta >= -45mV
-                constraints.append(zeta - 30)  # Zeta <= 30mV
+                constraints.append(min_hd_size - size_hd)  # HD Size >= 6nm
+                constraints.append(size_hd - max_hd_size)  # HD Size <= 310nm
+                constraints.append(min_zeta - zeta)  # Zeta >= -45mV
+                constraints.append(zeta - max_zeta)  # Zeta <= 30mV
 
                 out["G"] = np.array(constraints)
 
         problem = DynamicInverseProblem(self, xl, xu)
 
-        progress_callback = GenerationProgressBar(generations)
+        progress_callback = GenerationProgressBar(generations, ui_bar=ui_progress_bar)
 
         try:
             res = minimize(
@@ -266,16 +323,22 @@ class NanoparticleInverseModel:
             current_f_raw = res.F[idx].copy()
             current_f_raw[tumor_idx] = -current_f_raw[tumor_idx]
 
+            selected_core = allowed_cores[int(current_x[6])]
+
+            # re-derive the exact particle type used during optimization
+            valid_types_for_core = self.core_to_type[selected_core]
+            type_index = int(current_x[9]) % len(valid_types_for_core)
+
             design_entry = {
                 "design_params": {
                     "Size(TEM) (nm)": current_x[0],
                     "Size(HD) (nm)": current_x[1],
                     "Zeta Potential (mV)": current_x[2],
                     "PDI": current_x[3],
-                    "Core Material": self.core_options[int(current_x[6])],
+                    "Core Material": selected_core,
                     "Targeting Strategy": self.strategy_options[int(current_x[7])],
                     "Shape": self.shape_options[int(current_x[8])],
-                    "Particle Type": self.particle_type_options[int(current_x[9])],
+                    "Particle Type":valid_types_for_core[type_index],
                     "Dose (mg/kg)": current_x[4],
                     "Time Point (h)": current_x[5]
                 },
@@ -288,7 +351,9 @@ class NanoparticleInverseModel:
 
         return all_top_designs, res
 
-    def plot_pareto_front(self, res, save_folder='/content/drive/MyDrive/Nanoparticle_Project_Saves/'):
+
+
+    def plot_pareto_front(self, res, save_folder='/content/drive/MyDrive/Nanoparticle_Project_Saves/',):
         # visualize the 6D Pareto front as trade-offs against Tumor Uptake
 
         # res.F contains objectives: [-Tumor, Heart, Liver, Lung, Spleen, Kidney]
@@ -326,7 +391,19 @@ class NanoparticleInverseModel:
     # Visualizes the impact of numeric and categorical index features
     # on the trade-off between Liver toxicity and Tumor uptake.
     def plot_design_analysis(self, res, tumor_cell_type, toxic_organ_name="Liver Concentration (%ID/g)",
-                             save_folder='/content/drive/MyDrive/Nanoparticle_Project_Saves/'):
+                             allowed_cores=None, save_folder='/content/drive/MyDrive/Nanoparticle_Project_Saves/'):
+
+        # fallback if allowed_cores isn't passed
+        if not allowed_cores:
+            allowed_cores = self.core_options
+
+        # dynamic legend mapping depending on the active search space
+        dynamic_categorical_options = [
+            allowed_cores,
+            self.strategy_options,
+            self.shape_options,
+            self.particle_type_options
+        ]
 
         # identify indices for the axes
         try:
@@ -362,7 +439,7 @@ class NanoparticleInverseModel:
 
             # Determine if feature is categorical (index 6, 7, 8, or 9)
             if i >= categorical_start_index:
-                options = self.categorical_options_ordered[i - categorical_start_index]
+                options = dynamic_categorical_options[i - categorical_start_index]
                 n_options = len(options)
 
                 # Create discrete boundaries for categorical data

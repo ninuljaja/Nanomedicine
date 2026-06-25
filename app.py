@@ -67,6 +67,26 @@ for organ in healthy_organs:
     clean_label = organ.split(" ")[0]
     organ_weights[organ] = st.sidebar.slider(f"{clean_label} Penalty Weight", 1, 10, 1)
 
+# optimization constraints UI
+st.sidebar.header("Optimization Constraints")
+
+st.sidebar.info("Filter core materials and set target penalties.")
+
+with st.sidebar.expander("Allowed Core Materials", expanded=False):
+    st.caption("Particle Type is mapped automatically based on the cores selected.")
+    ui_allowed_cores = st.multiselect(
+        "Select Cores to explore:",
+        options=inverse_model.core_options,
+        default=inverse_model.core_options
+    )
+
+with st.sidebar.expander("Adjust soft constraints", expanded=False):
+    ui_min_tumor_conc = st.number_input("Min Tumor Accumulation (%ID/g)", value=10.0, step=1.0)
+    ui_max_pdi = st.slider("Target Max PDI", min_value=0.01, max_value=0.95, value=0.30, step=0.01)
+    ui_hd_range = st.slider("Target Size(HD) Bounds", min_value=3.0, max_value=400.0, value=(6.0, 310.0), step=1.0)
+    ui_zeta_range = st.slider("Target Zeta Bounds", min_value=-60.0, max_value=40.0, value=(-45.0, 30.0), step=1.0)
+
+
 # main dashboard
 st.title("Nanoparticle Inverse-Design Portal")
 
@@ -90,30 +110,61 @@ if run_clicked:
 
 # run optimization
 if st.session_state.is_running:
-    with st.spinner(f"Optimizing designs for {tumor_type}"):
+    with st.spinner(f"Optimizing designs for tumor in {tumor_type}"):
+
+        # create a Streamlit progress bar for the Optimization phase
+        opt_progress_bar = st.progress(0, text="Starting NSGA-III algorithm")
+
         # run optimization and save to session state
         top_designs, opt_res = inverse_model.predict_optimal_design(
             tumor_cell=tumor_type,
             tumor_size=tumor_size,
             body_weight=body_weight,
             sensitive_organ_weights=organ_weights,
-            generations=gens
+            generations=gens,
+            allowed_cores=ui_allowed_cores,  # Passes only the cores
+            max_pdi=ui_max_pdi,
+            min_tumor_conc=ui_min_tumor_conc,
+            min_hd_size=ui_hd_range[0],
+            max_hd_size=ui_hd_range[1],
+            min_zeta=ui_zeta_range[0],
+            max_zeta=ui_zeta_range[1],
+            ui_progress_bar=opt_progress_bar
         )
+
+        # snap optimization progress to 100% when finished
+        opt_progress_bar.progress(100, text="Optimization complete")
+
         # store everything in session state
         if top_designs is None or len(top_designs) == 0:
             st.session_state.is_running = False
             st.error("Optimization returned no valid designs. Try increasing generations or adjusting constraints.")
         else:
+            # create a Streamlit progress bar for the plotting phase
+            total_plots = len(healthy_organs)
+            plot_progress_bar = st.progress(0, text="Initializing plot generation")
             # pre-generate all organ plots while still in spinner
             cached_plots = {}
-            for organ in healthy_organs:
-                inverse_model.plot_design_analysis(opt_res, tumor_type, organ)
+            for i, organ in enumerate(healthy_organs):
+                # Update the progress bar text and percentage for each organ
+                current_percent = int((i / total_plots) * 100)
+                clean_organ_name = organ.split(" ")[0]
+                plot_progress_bar.progress(
+                    current_percent,
+                    text=f"Generating sensitivity plots for {clean_organ_name} ({i + 1}/{total_plots})..."
+                )
+
+                # generate and save the plot
+                inverse_model.plot_design_analysis(opt_res, tumor_type, organ, allowed_cores=ui_allowed_cores)
                 fig = plt.gcf()
                 buffer = io.BytesIO()
                 fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
                 buffer.seek(0)
                 cached_plots[organ] = buffer.getvalue()
                 plt.close(fig)
+
+            # snap progress to 100% when finished
+            plot_progress_bar.progress(100, text="All plots generated")
 
             st.session_state.top_designs = top_designs
             st.session_state.opt_res_object = opt_res
