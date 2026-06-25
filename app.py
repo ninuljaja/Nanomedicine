@@ -11,6 +11,8 @@ matplotlib.use('Agg')
 st.set_page_config(page_title="Nanoparticle Design Portal", layout="wide")
 
 
+
+
 # model loading
 @st.cache_resource
 def load_framework():
@@ -50,8 +52,8 @@ st.sidebar.header("Target Scenario")
 available_tumors = [t for t in inverse_model.forward_model.keys() if t.lower() != "other"]
 tumor_type = st.sidebar.selectbox("Select Tumor Type", available_tumors)
 
-tumor_size = st.sidebar.number_input("Tumor Size (cm³)", min_value=0.01, max_value=10.0, value=0.45, step=0.01)
-body_weight = st.sidebar.number_input("Body Weight (g)", min_value=1.0, max_value=500.0, value=22.0, step=0.1)
+tumor_size = st.sidebar.number_input("Tumor Size (cm³)", min_value=0.01, max_value=1000.0, value=0.45, step=0.1)
+body_weight = st.sidebar.number_input("Body Weight (g)", min_value=1.0, max_value=150000.0, value=22.0, step=1.0)
 gens = st.sidebar.slider("Optimization Generations", 10, 500, 60)
 
 st.sidebar.header("Organ Sensitivity")

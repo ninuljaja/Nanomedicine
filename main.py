@@ -87,8 +87,8 @@ class NanoparticleInverseModel:
         # [0]Size(TEM), [1]Size(HD), [2]Zeta Potential, [3]PDI, [4]Dose, [5]Time,
         # [6]Core(idx), [7]Strategy(idx), [8]Shape(idx), [9]Particle Type
 
-        xl = np.array([2.0, 2.7, -65.12, 0.01, 0.0001, 0.5, 0, 0, 0, 0])
-        xu = np.array([358.0, 1200.0, 71.3, 1.91, 1290.0, 72.0,
+        xl = np.array([2.0, 3.0, -60.0, 0.01, 0.01, 0.5, 0, 0, 0, 0])
+        xu = np.array([320.0, 400.0, 40, 0.95, 740.0, 96.0,
                        len(self.core_options) - 0.1,
                        len(self.strategy_options) - 0.1,
                        len(self.shape_options) - 0.1,
@@ -117,7 +117,6 @@ class NanoparticleInverseModel:
         # capture references needed inside the nested class
         outer_categorical_options = self.categorical_options_ordered
         outer_specific_features = self.specific_features
-        outer_categorical_features = self.categorical_features
         outer_target_names = self.target_names
         outer_tumor_target_name = self.tumor_target_name
 
@@ -170,9 +169,14 @@ class NanoparticleInverseModel:
 
                 preds = []
                 for organ in self.outer.target_names:
-                    booster = tumor_specific_models[organ]
-                    log_val = booster.predict(dmatrix)[0]
-                    preds.append(np.expm1(np.nan_to_num(log_val, nan=0.0)))
+                    # Check if the model exists for this specific tumor
+                    if organ in tumor_specific_models:
+                        booster = tumor_specific_models[organ]
+                        log_val = booster.predict(dmatrix)[0]
+                        preds.append(np.expm1(log_val))
+                    else:
+                        # Fallback for missing organ models to prevent KeyError
+                        preds.append(0.0)
 
                 # find the index of the tumor to maximize it (minimize its negative)
                 tumor_idx = outer_target_names.index(outer_tumor_target_name)
@@ -187,9 +191,6 @@ class NanoparticleInverseModel:
                 size_hd = x[1]
                 zeta = x[2]
                 pdi = x[3]
-                # strategy: 0 = active, 1 = passive
-                strategy = int(np.round(x[7]))
-                strategy = np.clip(strategy, 0, 1)
 
                 # Identify the tumor prediction
                 tumor_idx = outer_target_names.index(outer_tumor_target_name)
@@ -200,8 +201,8 @@ class NanoparticleInverseModel:
                 # Physical Consistency (2 constraints)
                 # HD must be >= TEM
                 constraints.append(size_tem - size_hd)  # <= 0
-                # Enforce PDI <= 0.2
-                constraints.append(pdi - 0.2)
+                # Enforce PDI <= 0.3
+                constraints.append(pdi - 0.3)
 
                 # Biological Efficacy (1 constraint)
                 # Reject if tumor concentration is less than 10%
@@ -209,21 +210,12 @@ class NanoparticleInverseModel:
                 # If tumor is 15%, 10 - 15 = -5 (Negative = Success)
                 constraints.append(10 - predicted_tumor_conc)
 
-                # Strategy Dependent (4 constraints)
-                if strategy == 1:  # passive
-                    # Size constraints
-                    constraints.append(20 - size_hd)  # size >= 20
-                    constraints.append(size_hd - 150)  # size <= 150
-                    # Zeta constraints
-                    constraints.append(-10 - zeta)  # zeta >= -10
-                    constraints.append(zeta - 10)  # zeta <= 10
-                else:  # active
-                    # Size constraints
-                    constraints.append(20 - size_hd)
-                    constraints.append(size_hd - 100)
-                    # Zeta constraints
-                    constraints.append(-20 - zeta)
-                    constraints.append(zeta - 10)
+                # Unified Biological Feasibility (4 constraints)
+                # Penalize designs that stray outside the 2.5% - 97.5% dense data regions
+                constraints.append(6 - size_hd)  # HD Size >= 6nm
+                constraints.append(size_hd - 310)  # HD Size <= 310nm
+                constraints.append(-45 - zeta)  # Zeta >= -45mV
+                constraints.append(zeta - 30)  # Zeta <= 30mV
 
                 out["G"] = np.array(constraints)
 
@@ -242,6 +234,10 @@ class NanoparticleInverseModel:
             )
         finally:
             progress_callback.close()
+
+        # Prevent NoneType crash if no feasible designs are found
+        if res.X is None or res.F is None:
+            return [], res
 
         # rank results by selectivity score: maximize tumor while minimizing weighted toxicity
         tumor_idx = self.target_names.index(self.tumor_target_name)
