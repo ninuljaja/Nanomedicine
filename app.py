@@ -54,7 +54,8 @@ tumor_type = st.sidebar.selectbox("Select Tumor Type", available_tumors)
 
 tumor_size = st.sidebar.number_input("Tumor Size (cm³)", min_value=0.01, max_value=1000.0, value=0.45, step=0.1)
 body_weight = st.sidebar.number_input("Body Weight (g)", min_value=1.0, max_value=150000.0, value=22.0, step=1.0)
-gens = st.sidebar.slider("Optimization Generations", 10, 500, 60)
+#gens = st.sidebar.slider("Optimization Generations", 10, 500, 60)
+gens = st.sidebar.number_input("Optimization Generations", min_value=10, max_value=1000, value=60, step=1)
 
 st.sidebar.header("Organ Sensitivity")
 st.sidebar.info("Adjust weights to penalize accumulation")
@@ -145,23 +146,38 @@ if st.session_state.is_running:
             plot_progress_bar = st.progress(0, text="Initializing plot generation")
             # pre-generate all organ plots while still in spinner
             cached_plots = {}
-            for i, organ in enumerate(healthy_organs):
-                # Update the progress bar text and percentage for each organ
-                current_percent = int((i / total_plots) * 100)
-                clean_organ_name = organ.split(" ")[0]
-                plot_progress_bar.progress(
-                    current_percent,
-                    text=f"Generating sensitivity plots for {clean_organ_name} ({i + 1}/{total_plots})..."
-                )
+            try:
+                for i, organ in enumerate(healthy_organs):
+                    # Update the progress bar text and percentage for each organ
+                    current_percent = int((i / total_plots) * 100)
+                    clean_organ_name = organ.split(" ")[0]
+                    plot_progress_bar.progress(
+                        current_percent,
+                        text=f"Generating sensitivity plots for {clean_organ_name} ({i + 1}/{total_plots})..."
+                    )
 
-                # generate and save the plot
-                inverse_model.plot_design_analysis(opt_res, tumor_type, organ, allowed_cores=ui_allowed_cores)
-                fig = plt.gcf()
-                buffer = io.BytesIO()
-                fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
-                buffer.seek(0)
-                cached_plots[organ] = buffer.getvalue()
-                plt.close(fig)
+                    # generate and save the plot
+                    inverse_model.plot_design_analysis(opt_res, tumor_type, organ, allowed_cores=ui_allowed_cores)
+                    fig = plt.gcf()
+                    buffer = io.BytesIO()
+                    fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+                    buffer.seek(0)
+                    cached_plots[organ] = buffer.getvalue()
+                    plt.close(fig)
+            except Exception as e:
+                st.error(f"Plotting interrupted: {e}")
+                st.session_state.is_running = False
+                st.stop()
+
+            # generate and cache the Pareto Front plot
+            plot_progress_bar.progress(95, text="Generating Pareto front visualization...")
+            inverse_model.plot_pareto_front(opt_res)
+            fig_pareto = plt.gcf()
+            buffer_pareto = io.BytesIO()
+            fig_pareto.savefig(buffer_pareto, format='png', dpi=150, bbox_inches='tight')
+            buffer_pareto.seek(0)
+            st.session_state.cached_pareto_plot = buffer_pareto.getvalue()
+            plt.close(fig_pareto)
 
             # snap progress to 100% when finished
             plot_progress_bar.progress(100, text="All plots generated")
@@ -179,6 +195,17 @@ if st.session_state.results_ready:
     top_designs = st.session_state.top_designs
     optimization_result = st.session_state.opt_res_object
 
+    # Retrieve actual run metrics from the result object
+    actual_gens = optimization_result.algorithm.n_gen
+    pop_size = optimization_result.algorithm.pop_size
+    total_evals = actual_gens * pop_size
+
+    # Create a layout for metrics
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Generations Run", f"{actual_gens}")
+    m2.metric("Population Size", f"{pop_size}")
+    m3.metric("Total Evaluations", f"{total_evals:,}")
+
     # result Table
     st.header("Top 10 Optimized Designs")
     results_list = [d['design_params'].copy() for d in top_designs]
@@ -188,6 +215,7 @@ if st.session_state.results_ready:
     params_df = pd.DataFrame(results_list)
 
     st.dataframe(params_df, width='stretch')
+
 
     # distribution visualization
     st.divider()
@@ -218,6 +246,11 @@ if st.session_state.results_ready:
                         }
                     }, width='stretch')
 
+    # display Pareto Front
+    st.divider()
+    st.header("Multi-Objective Pareto Front")
+    st.image(st.session_state.cached_pareto_plot, width='stretch')
+
     # Trade-off Analysis
     st.divider()
     st.header("Sensitivity & Trade-off Analysis")
@@ -227,15 +260,6 @@ if st.session_state.results_ready:
     # update the plot every time 'analysis_organ' changes
     with st.container():
         st.image(st.session_state.cached_organ_plots[analysis_organ], width='content')
-
-        #inverse_model.plot_design_analysis(optimization_result, tumor_type, analysis_organ)
-
-        # grab the plot from the global canvas and show it in the app
-        #st.pyplot(plt.gcf())
-
-        # clear the canvas for the next time the script runs
-        #plt.clf()
-
 
     # CSV Download
     csv = params_df.to_csv(index=False).encode('utf-8')

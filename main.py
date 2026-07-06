@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import math
 from tqdm.auto import tqdm
+from pymoo.termination.default import DefaultMultiObjectiveTermination
+import os
 
 # Iincrease base font sizes for all plots
 plt.rcParams.update({
@@ -156,10 +158,10 @@ class NanoparticleInverseModel:
 
         xl = np.array([2.0, 3.0, -60.0, 0.01, 0.01, 0.5, 0, 0, 0, 0])
         xu = np.array([320.0, 400.0, 40, 0.95, 740.0, 96.0,
-                       len(allowed_cores) - 0.1,
-                       len(self.strategy_options) - 0.1,
-                       len(self.shape_options) - 0.1,
-                       len(self.particle_type_options) - 0.1])
+                       len(allowed_cores) - 1e-5,
+                       len(self.strategy_options) - 1e-5,
+                       len(self.shape_options) - 1e-5,
+                       len(self.particle_type_options) - 1e-5])
 
 
 
@@ -293,19 +295,30 @@ class NanoparticleInverseModel:
 
         problem = DynamicInverseProblem(self, xl, xu)
 
+        # define convergence-based termination
+        # ftol: tolerance for changes in objective space
+        # period: how many generations to look back to check for improvement
+        # n_max_gen: absolute maximum generations (controlled by the user UI)
+        convergence_termination = DefaultMultiObjectiveTermination(
+            ftol=0.0025,
+            period=15,
+            n_max_gen=generations
+        )
+
         progress_callback = GenerationProgressBar(generations, ui_bar=ui_progress_bar)
 
         try:
             res = minimize(
                 problem,
                 self.algorithm,
-                termination=('n_gen', generations),
+                termination=convergence_termination,
                 seed=42,
                 verbose=False,
                 callback=progress_callback
             )
         finally:
             progress_callback.close()
+
 
         # Prevent NoneType crash if no feasible designs are found
         if res.X is None or res.F is None:
@@ -383,25 +396,40 @@ class NanoparticleInverseModel:
         organ_names = [self.target_names[i] for i in healthy_organ_indices]
 
         n_organs = organs_data.shape[1]
-        fig, axes = plt.subplots(1, n_organs, figsize=(20, 4), sharey=True)
+
+        # split into 2 rows
+        nrows = 2
+        ncols = math.ceil(n_organs / nrows)
+
+        fig, axes = plt.subplots(nrows, ncols, figsize=(20, 10))
+        axes = axes.flatten()
+        plt.tight_layout()
+        # hspace controls vertical space, wspace controls horizontal space
+        plt.subplots_adjust(hspace=0.5, wspace=0.3)
+
 
         for i in range(n_organs):
             ax = axes[i]
             ax.scatter(organs_data[:, i], tumor_uptake, alpha=0.5, c='teal', edgecolors='k')
             ax.set_title(f"Tumor vs {organ_names[i]}", fontsize=18)
             ax.set_xlabel(f"{organ_names[i]} (%ID/g)", fontsize=16)
-            if i == 0:
+            # only set ylabel on the first column of each row
+            if i % ncols == 0:
                 ax.set_ylabel("Tumor Uptake (%ID/g)", fontsize=16)
             ax.grid(True, linestyle='--', alpha=0.6)
 
-        plt.tight_layout()
-        # save to Colab
-        filename = "inverse_design_pareto_front.png"
-        plt.savefig(filename, dpi=300)
+        # remove any empty subplots
+        for j in range(n_organs, len(axes)):
+            fig.delaxes(axes[j])
 
-        # Save to Drive
+        #plt.tight_layout()
+        # save
+        filename = "plots/inverse_design_pareto_front.png"
 
-        #plt.show()
+        # ensure the directory exists
+        os.makedirs("plots", exist_ok=True)
+
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
 
     # Visualizes the impact of numeric and categorical index features
     # on the trade-off between Liver toxicity and Tumor uptake.
@@ -422,6 +450,12 @@ class NanoparticleInverseModel:
 
         # reconstruct actual particle types
         X_plot = res.X.copy()
+
+        # cast categorical indices to match the int() truncation used in evaluation
+        X_plot[:, 6] = X_plot[:, 6].astype(int)
+        X_plot[:, 7] = X_plot[:, 7].astype(int)
+        X_plot[:, 8] = X_plot[:, 8].astype(int)
+
         for r in range(len(X_plot)):
             # check what core was chosen for this specific row
             core_str = allowed_cores[int(X_plot[r, 6])]
@@ -518,9 +552,15 @@ class NanoparticleInverseModel:
             fontsize=26, y=1.01, fontweight='bold'
         )
         plt.tight_layout()
-        # save to Colab
-        filename = "inverse_design_analysis_plot.png"
-        plt.savefig(filename, dpi=300)
+        # save
+
+
+        filename = f"plots/inverse_design_analysis_plot_{clean_toxic_name}.png"
+
+        # ensure the directory exists
+        os.makedirs("plots", exist_ok=True)
+
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
 
 
         #plt.show()
