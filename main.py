@@ -6,6 +6,14 @@ import matplotlib.colors as mcolors
 import math
 from tqdm.auto import tqdm
 
+# Iincrease base font sizes for all plots
+plt.rcParams.update({
+    'font.size': 14,
+    'axes.labelsize': 16,
+    'xtick.labelsize': 14,
+    'ytick.labelsize': 14,
+    'legend.fontsize': 14
+})
 # Pymoo imports
 from pymoo.core.problem import ElementwiseProblem
 from pymoo.optimize import minimize
@@ -14,7 +22,6 @@ from pymoo.util.ref_dirs import get_reference_directions
 from pymoo.core.callback import Callback
 
 
-# Progress Bar Callback
 # Progress Bar Callback
 class GenerationProgressBar(Callback):
     def __init__(self, n_gen, ui_bar=None):
@@ -66,12 +73,19 @@ class NanoparticleInverseModel:
 
         # categorical options for optimization mapping
         self.core_options = [
-            "2d_material", "albumin", "carbon_nanotube", "copper", "dendrimer",
-            "drug_based", "gold", "graphene", "hydrogel", "iron oxide",
-            "lipid_based", "liposome", "magnetic", "manganese", "metallic",
-            "platinum", "polymeric", "polymeric_composite",
-            "protein_based", "silica", "silica_based"
+            # Inorganic (INM) Cores
+            "2d_material", "copper", "gold", "iron oxide",
+            "manganese", "platinum", "silica",
+
+            # Hybrid / Mixed Cores
+            "drug_based", "lipid_based", "polymeric_composite",
+            "magnetic", "metallic", "silica_based",
+
+            # Organic (ONM) Cores
+            "albumin", "carbon_nanotube", "dendrimer", "graphene",
+            "hydrogel", "liposome", "polymeric", "protein_based"
         ]
+
 
         # dependency mapping: Core Material -> Particle Type
         self.core_to_type = {
@@ -262,7 +276,8 @@ class NanoparticleInverseModel:
                 constraints.append(pdi - max_pdi)
 
                 # Biological Efficacy (1 constraint)
-                # Reject if tumor concentration is less than 10%
+                # Reject if tumor concentration is less than min_tumor_conc
+                # Example: min_tumor_conc = 10%:
                 # If tumor is 5%, 10 - 5 = 5 (Positive = Violation)
                 # If tumor is 15%, 10 - 15 = -5 (Negative = Success)
                 constraints.append(min_tumor_conc - predicted_tumor_conc)
@@ -373,10 +388,10 @@ class NanoparticleInverseModel:
         for i in range(n_organs):
             ax = axes[i]
             ax.scatter(organs_data[:, i], tumor_uptake, alpha=0.5, c='teal', edgecolors='k')
-            ax.set_title(f"Tumor vs {organ_names[i]}")
-            ax.set_xlabel(f"{organ_names[i]} (%ID/g)")
+            ax.set_title(f"Tumor vs {organ_names[i]}", fontsize=18)
+            ax.set_xlabel(f"{organ_names[i]} (%ID/g)", fontsize=16)
             if i == 0:
-                ax.set_ylabel("Tumor Uptake (%ID/g)")
+                ax.set_ylabel("Tumor Uptake (%ID/g)", fontsize=16)
             ax.grid(True, linestyle='--', alpha=0.6)
 
         plt.tight_layout()
@@ -404,6 +419,19 @@ class NanoparticleInverseModel:
             self.shape_options,
             self.particle_type_options
         ]
+
+        # reconstruct actual particle types
+        X_plot = res.X.copy()
+        for r in range(len(X_plot)):
+            # check what core was chosen for this specific row
+            core_str = allowed_cores[int(X_plot[r, 6])]
+            valid_types = self.core_to_type[core_str]
+
+            # re-run the modulo math to find the actual Particle Type used
+            actual_type = valid_types[int(X_plot[r, 9]) % len(valid_types)]
+
+            # overwrite the raw guess with the explicit index from our ordered list
+            X_plot[r, 9] = self.particle_type_options.index(actual_type)
 
         # identify indices for the axes
         try:
@@ -450,7 +478,7 @@ class NanoparticleInverseModel:
                 sc = ax.scatter(
                     toxic_vals,
                     tumor_vals,
-                    c=res.X[:, i],
+                    c=X_plot[:, i],
                     cmap=cmap,
                     norm=norm,
                     s=45,
@@ -460,23 +488,25 @@ class NanoparticleInverseModel:
 
                 # set discrete ticks on colorbar
                 cbar = plt.colorbar(sc, ax=ax, ticks=range(n_options))
-                cbar.ax.set_yticklabels(options)
+                cbar.ax.set_yticklabels(options, fontsize=14)
             else:
                 # continuous mapping for numeric features
                 sc = ax.scatter(
                     toxic_vals,
                     tumor_vals,
-                    c=res.X[:, i],
+                    c=X_plot[:, i],
                     cmap='plasma',
                     s=45,
                     edgecolors='k',
                     alpha=0.7
                 )
-                plt.colorbar(sc, ax=ax, label=label)
+                cbar = plt.colorbar(sc, ax=ax)
+                cbar.set_label(label, size=14)
+                cbar.ax.tick_params(labelsize=14)
 
-            ax.set_title(f"Impact of {label}", fontsize=14, fontweight='bold')
-            ax.set_xlabel(f"Predicted {clean_toxic_name} Conc. (%ID/g)")
-            ax.set_ylabel(f"{tumor_cell_type.capitalize()} Tumor (%ID/g)")
+            ax.set_title(f"Impact of {label}", fontsize=18, fontweight='bold')
+            ax.set_xlabel(f"Predicted {clean_toxic_name} Conc. (%ID/g)", fontsize=16)
+            ax.set_ylabel(f"{tumor_cell_type.capitalize()} Tumor (%ID/g)", fontsize=16)
             ax.grid(True, linestyle='--', alpha=0.3)
 
         # remove any empty subplots if n_features isn't a multiple of 3
@@ -485,7 +515,7 @@ class NanoparticleInverseModel:
 
         plt.suptitle(
             f"Inverse Design Sensitivity: TUMOR vs. {clean_toxic_name.upper()}",
-            fontsize=22, y=1.01, fontweight='bold'
+            fontsize=26, y=1.01, fontweight='bold'
         )
         plt.tight_layout()
         # save to Colab
