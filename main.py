@@ -407,15 +407,20 @@ class NanoparticleInverseModel:
         # hspace controls vertical space, wspace controls horizontal space
         plt.subplots_adjust(hspace=0.5, wspace=0.3)
 
+        # Generate the alphabetical label (a, b, c ...)
+
 
         for i in range(n_organs):
+            subplot_letter = chr(97 + i)
             ax = axes[i]
             ax.scatter(organs_data[:, i], tumor_uptake, alpha=0.5, c='teal', edgecolors='k')
-            ax.set_title(f"Tumor vs {organ_names[i]}", fontsize=18)
-            ax.set_xlabel(f"{organ_names[i]} (%ID/g)", fontsize=16)
+            organ_accumulation_label = organ_names[i].split()[0] + " Accumulation (%ID/g)"
+            ax.set_title(f"({subplot_letter}) Tumor vs {organ_accumulation_label}", fontsize=20, fontweight='bold')
+            ax.set_xlabel(f"{organ_accumulation_label}", fontsize=18)
+            ax.tick_params(axis='both', labelsize=16)
             # only set ylabel on the first column of each row
             if i % ncols == 0:
-                ax.set_ylabel("Tumor Uptake (%ID/g)", fontsize=16)
+                ax.set_ylabel("Tumor Accumulation (%ID/g)", fontsize=18)
             ax.grid(True, linestyle='--', alpha=0.6)
 
         # remove any empty subplots
@@ -499,6 +504,9 @@ class NanoparticleInverseModel:
 
             label = self.var_order[i]
 
+            # Generate the alphabetical label (a, b, c ...)
+            subplot_letter = chr(97 + i)
+
             # Determine if feature is categorical (index 6, 7, 8, or 9)
             if i >= categorical_start_index:
                 options = dynamic_categorical_options[i - categorical_start_index]
@@ -522,7 +530,9 @@ class NanoparticleInverseModel:
 
                 # set discrete ticks on colorbar
                 cbar = plt.colorbar(sc, ax=ax, ticks=range(n_options))
-                cbar.ax.set_yticklabels(options, fontsize=14)
+                # Core Material: 14 pt; other categorical variables: 16 pt
+                tick_fontsize = 14 if i == categorical_start_index else 16
+                cbar.ax.set_yticklabels(options, fontsize=tick_fontsize)
             else:
                 # continuous mapping for numeric features
                 sc = ax.scatter(
@@ -535,12 +545,13 @@ class NanoparticleInverseModel:
                     alpha=0.7
                 )
                 cbar = plt.colorbar(sc, ax=ax)
-                cbar.set_label(label, size=14)
-                cbar.ax.tick_params(labelsize=14)
+                cbar.set_label(label, size=18)
+                cbar.ax.tick_params(labelsize=16)
 
-            ax.set_title(f"Impact of {label}", fontsize=18, fontweight='bold')
-            ax.set_xlabel(f"Predicted {clean_toxic_name} Conc. (%ID/g)", fontsize=16)
-            ax.set_ylabel(f"{tumor_cell_type.capitalize()} Tumor (%ID/g)", fontsize=16)
+            ax.set_title(f"({subplot_letter}) Impact of {label}", fontsize=20, fontweight='bold')
+            ax.set_xlabel(f"{clean_toxic_name} Accumulation (%ID/g)", fontsize=18)
+            ax.set_ylabel(f"Tumor Accumulation (%ID/g)", fontsize=18)
+            ax.tick_params(axis='both', labelsize=16)
             ax.grid(True, linestyle='--', alpha=0.3)
 
         # remove any empty subplots if n_features isn't a multiple of 3
@@ -548,7 +559,7 @@ class NanoparticleInverseModel:
             fig.delaxes(axes[j])
 
         plt.suptitle(
-            f"Inverse Design Sensitivity: TUMOR vs. {clean_toxic_name.upper()}",
+            f"Inverse Design Sensitivity: {tumor_cell_type.upper()} TUMOR vs. {clean_toxic_name.upper()}",
             fontsize=26, y=1.01, fontweight='bold'
         )
         plt.tight_layout()

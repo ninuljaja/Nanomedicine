@@ -228,7 +228,18 @@ if st.session_state.results_ready:
                 design = top_designs[design_idx]
                 with cols[col_idx]:
                     st.subheader(f"Rank #{design_idx + 1}")
-                    st.metric("Score", f"{design['selectivity_score']:.2f}")
+                    #st.metric("Score", f"{design['selectivity_score']:.2f}")
+                    st.markdown(
+                        f"""
+                        <div>
+                            <div style="font-size: 20px; font-weight: 500;">Score</div>
+                            <div style="font-size: 28px; font-weight: 500;">
+                                {design['selectivity_score']:.2f}
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
                     clean_dist = {k.split(" ")[0]: v for k, v in design['predicted_distribution'].items()}
                     #dist_df = pd.DataFrame.from_dict(clean_dist, orient='index', columns=['%ID/g'])
                     #st.bar_chart(dist_df)
@@ -241,8 +252,23 @@ if st.session_state.results_ready:
                     st.vega_lite_chart(dist_df, {
                         "mark": "bar",
                         "encoding": {
-                            "x": {"field": "Organ", "type": "nominal", "title": ""},
-                            "y": {"field": "%ID/g", "type": "quantitative", "title": "%ID/g"}
+                            "x": {
+                                "field": "Organ",
+                                "type": "nominal",
+                                "title": "",
+                                "axis": {
+                                    "labelFontSize": 16
+                                }
+                            },
+                            "y": {
+                                "field": "%ID/g",
+                                "type": "quantitative",
+                                "title": "%ID/g",
+                                "axis": {
+                                    "labelFontSize": 16,
+                                    "titleFontSize": 18
+                                }
+                            }
                         }
                     }, width='stretch')
 
